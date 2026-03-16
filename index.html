@@ -5374,14 +5374,29 @@ function wireCoreCatalogManager(){
         if(toSel) toSel.value = key;
         updateUpgradeScopeFromRange();
 
-        setCoreCatalogStatus(`Added ${label} (${key}). Saved locally only. To share to everyone now: connect Shared JSON and sync, or commit core-catalog.json to GitHub.`, false);
-        if(coreCatalogRemoteUrl){
-          pushRemoteCatalog().then(function(){
-            setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON.`, false);
-          }).catch(function(err){
-            setCoreCatalogStatus(`Added locally, but remote sync failed: ${err && err.message ? err.message : String(err)}`, true);
-          });
+        const shouldShareNow = confirm(`Added ${label} (${key}) locally. Do you want to sync it to everyone now?`);
+        if(!shouldShareNow){
+          setCoreCatalogStatus(`Added ${label} (${key}). Saved locally only.`, false);
+          return;
         }
+
+        let targetUrl = coreCatalogRemoteUrl;
+        if(!targetUrl){
+          const enteredUrl = prompt("To sync for everyone now, paste Shared JSON URL (GET + PUT + CORS):", "");
+          targetUrl = String(enteredUrl || "").trim();
+          if(!targetUrl){
+            setCoreCatalogStatus(`Added ${label} (${key}) locally. Sync cancelled (no shared JSON URL provided).`, true);
+            return;
+          }
+          setCoreCatalogRemoteUrl(targetUrl);
+          if(remoteUrlInput) remoteUrlInput.value = targetUrl;
+        }
+
+        pushRemoteCatalog().then(function(){
+          setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON. Everyone using this workspace link will see it.`, false);
+        }).catch(function(err){
+          setCoreCatalogStatus(`Added locally, but sync to shared JSON failed: ${err && err.message ? err.message : String(err)}`, true);
+        });
       }catch(err){
         setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
       }
