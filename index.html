@@ -3834,11 +3834,11 @@ function rebuildCoreToOptions(){
   placeholder.textContent = "Select...";
   toSel.appendChild(placeholder);
 
-  // allow TO >= FROM by default (can be changed to > if needed)
+  // allow TO versions strictly AFTER FROM
   const allowed = window.CORE_VERSIONS.filter(o => {
     const n = coreKeyToNumber(o.key);
     if(!Number.isFinite(fromNum) || !Number.isFinite(n)) return true;
-    return n >= fromNum;
+    return n > fromNum;
   });
 
   allowed.forEach(o => {
