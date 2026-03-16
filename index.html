@@ -1065,8 +1065,15 @@
                            <input class="initial-select" id="newCoreLabel" placeholder="core 22.1" />
                         </div>
                      </div>
-                     <label for="newCoreTechStackJson">CORE_TECH_STACK params (JSON, optional)</label>
-                     <textarea id="newCoreTechStackJson" style="width:100%; min-height:90px; margin-top:8px; padding:10px; border:1px solid var(--border); border-radius:8px;" placeholder='{"java":"OpenJDK 21","database":"Oracle 19"}'>{}</textarea>
+                     <label for="newCoreTechStackJson">CORE_TECH_STACK params (JSON, optional) *</label>
+                     <small style="margin-bottom:8px; display:block;">Not sure what to write? Paste the example below and edit values as needed.</small>
+                     <textarea id="newCoreTechStackJson" style="width:100%; min-height:170px; margin-top:8px; padding:10px; border:1px solid var(--border); border-radius:8px;" placeholder='{"java":"OpenJDK 21","database":"Oracle 19"}'>{
+  "java": "OpenJDK 21",
+  "database": "Oracle 19",
+  "kubernetes": "1.30",
+  "complexityMultiplier": 1.6,
+  "platform": "OpenShift"
+}</textarea>
                      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
                        <button type="button" class="calculate-btn" id="addCoreVersionBtn">Add core version</button>
                        <button type="button" class="back-button" id="exportCoreCatalogBtn">Export catalog JSON</button>
