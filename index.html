@@ -1050,6 +1050,40 @@
                         </label>
                      </div>
                   </div>
+                  <div class="upload-box" id="coreCatalogManager" style="display:none; margin-bottom:12px;">
+                     <label>Add missing core version (no DB mode)</label>
+                     <small style="margin-bottom:10px;">Use a shared JSON endpoint (GET/PUT). Once connected, every add/update is auto-synced so everyone using your workspace link sees updates automatically.</small>
+                     <div class="input-grid" style="margin-top:10px; margin-bottom:10px;">
+                        <div class="input-group">
+                           <label for="newCoreKey">Core key</label>
+                           <input class="initial-select" id="newCoreKey" placeholder="core22_1" />
+                        </div>
+                        <div class="input-group">
+                           <label for="newCoreLabel">Display label</label>
+                           <input class="initial-select" id="newCoreLabel" placeholder="core 22.1" />
+                        </div>
+                     </div>
+                     <label for="newCoreTechStackJson">CORE_TECH_STACK params (JSON, optional)</label>
+                     <textarea id="newCoreTechStackJson" style="width:100%; min-height:90px; margin-top:8px; padding:10px; border:1px solid var(--border); border-radius:8px;" placeholder='{"java":"OpenJDK 21","database":"Oracle 19"}'>{}</textarea>
+                     <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+                       <button type="button" class="calculate-btn" id="addCoreVersionBtn">Add core version</button>
+                       <button type="button" class="back-button" id="exportCoreCatalogBtn">Export catalog JSON</button>
+                       <button type="button" class="back-button" id="importCoreCatalogBtn">Import catalog JSON</button>
+                       <input type="file" id="importCoreCatalogInput" accept="application/json,.json" style="display:none;" />
+                     </div>
+                     <div style="display:flex; gap:8px; margin-top:10px;">
+                       <input class="initial-select" id="coreCatalogRemoteUrl" placeholder="Shared JSON URL (must support GET + PUT + CORS)" />
+                       <button type="button" class="back-button" id="connectCoreCatalogRemoteBtn">Connect shared JSON</button>
+                     </div>
+                     <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+                       <button type="button" class="back-button" id="copyCoreCatalogShareLinkBtn">Copy workspace link</button>
+                     </div>
+                     <div style="display:flex; gap:8px; margin-top:10px;">
+                       <input class="initial-select" id="coreCatalogShareLinkInput" placeholder="Paste workspace link here" />
+                       <button type="button" class="back-button" id="loadCoreCatalogFromLinkBtn">Load workspace link</button>
+                     </div>
+                     <small id="coreCatalogStatus" style="margin-top:10px;"></small>
+                  </div>
 <div class="upload-box">
                      <label>Upload ReleasedFileChanges.txt (optional auto-calculate)</label>
                      <input type="file" id="txtUpload" accept=".txt" />
@@ -1862,6 +1896,166 @@ const CORE_TECH_STACK = {
   { key: "core20_2", label: "core 20.2" },
   { key: "core21_3", label: "core 21.3" }
 ];
+
+const CORE_CATALOG_STORAGE_KEY = "core_upgrade.catalog.v1";
+const DEFAULT_CORE_VERSIONS = JSON.parse(JSON.stringify(window.CORE_VERSIONS || []));
+const DEFAULT_CORE_TECH_STACK = JSON.parse(JSON.stringify(CORE_TECH_STACK || {}));
+
+function cloneDeep(obj){ return JSON.parse(JSON.stringify(obj)); }
+
+function normalizeCoreKey(value){
+  const raw = String(value || "").trim().toLowerCase().replace(/[.\s-]+/g, "_");
+  const m = raw.match(/^core(\d+)_?(\d+)$/i);
+  if(!m) return "";
+  return `core${parseInt(m[1], 10)}_${parseInt(m[2], 10)}`;
+}
+
+function syncCoreTechStack(nextMap){
+  Object.keys(CORE_TECH_STACK).forEach((k) => { delete CORE_TECH_STACK[k]; });
+  Object.keys(nextMap || {}).forEach((k) => { CORE_TECH_STACK[k] = nextMap[k]; });
+}
+
+function compareCoreKeys(a, b){
+  const an = coreKeyToNumber(a);
+  const bn = coreKeyToNumber(b);
+  if(Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+  return String(a || "").localeCompare(String(b || ""));
+}
+
+function applyCoreCatalog(catalog, opts){
+  const options = opts || {};
+  const incomingVersions = Array.isArray(catalog && catalog.versions) ? catalog.versions : [];
+  const incomingStack = (catalog && typeof catalog.techStack === "object" && catalog.techStack) ? catalog.techStack : {};
+
+  const mergedVersions = incomingVersions
+    .map((v) => ({ key: normalizeCoreKey(v && v.key), label: String((v && v.label) || "").trim() }))
+    .filter((v) => v.key && v.label);
+
+  if(!mergedVersions.length){
+    if(options.allowEmpty) return false;
+    throw new Error("Catalog must include at least one valid version.");
+  }
+
+  mergedVersions.sort((x, y) => compareCoreKeys(x.key, y.key));
+  window.CORE_VERSIONS = mergedVersions;
+
+  const mergedStack = {};
+  Object.keys(incomingStack).forEach((k) => {
+    const norm = normalizeCoreKey(k);
+    if(!norm) return;
+    const val = incomingStack[k];
+    mergedStack[norm] = (val && typeof val === "object") ? val : {};
+  });
+
+  // keep baseline data if version exists but tech stack entry is missing
+  mergedVersions.forEach((v) => {
+    if(!mergedStack[v.key]) mergedStack[v.key] = cloneDeep(DEFAULT_CORE_TECH_STACK[v.key] || {});
+  });
+  syncCoreTechStack(mergedStack);
+
+  const fromSel = document.getElementById("coreFrom");
+  const prevFrom = fromSel ? fromSel.value : "";
+  setSelectOptions(fromSel, window.CORE_VERSIONS, prevFrom);
+  updateToOptionsFromFromSelection();
+  updateUpgradeScopeFromRange();
+  if(typeof updateTechDashboard === "function") updateTechDashboard();
+  return true;
+}
+
+function saveCoreCatalogToLocalStorage(){
+  const payload = {
+    versions: cloneDeep(window.CORE_VERSIONS || []),
+    techStack: cloneDeep(CORE_TECH_STACK || {})
+  };
+  localStorage.setItem(CORE_CATALOG_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function loadCoreCatalogFromLocalStorage(){
+  const raw = localStorage.getItem(CORE_CATALOG_STORAGE_KEY);
+  if(!raw) return false;
+  const parsed = JSON.parse(raw);
+  return applyCoreCatalog(parsed, { allowEmpty: true });
+}
+
+function buildCoreCatalogPayload(){
+  return {
+    versions: cloneDeep(window.CORE_VERSIONS || []),
+    techStack: cloneDeep(CORE_TECH_STACK || {})
+  };
+}
+
+function downloadCoreCatalog(){
+  const payload = buildCoreCatalogPayload();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "core-catalog.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+const CORE_REMOTE_URL_STORAGE_KEY = "core_upgrade.catalog.remoteUrl";
+let coreCatalogRemotePollTimer = null;
+let coreCatalogRemoteUrl = "";
+
+function getCatalogUrlFromLocation(){
+  const url = new URL(location.href);
+  return String(url.searchParams.get("catalogUrl") || "").trim();
+}
+
+function buildCoreCatalogShareLink(){
+  if(!coreCatalogRemoteUrl) return "";
+  const url = new URL(location.href);
+  url.searchParams.set("catalogUrl", coreCatalogRemoteUrl);
+  return url.toString();
+}
+
+function stopCoreCatalogRemotePolling(){
+  if(coreCatalogRemotePollTimer){ clearInterval(coreCatalogRemotePollTimer); coreCatalogRemotePollTimer = null; }
+}
+
+function startCoreCatalogRemotePolling(){
+  stopCoreCatalogRemotePolling();
+  if(!coreCatalogRemoteUrl) return;
+  coreCatalogRemotePollTimer = setInterval(function(){
+    pullRemoteCatalog().catch(() => {});
+  }, 10000);
+}
+
+function setCoreCatalogRemoteUrl(url){
+  coreCatalogRemoteUrl = String(url || "").trim();
+  if(coreCatalogRemoteUrl){
+    localStorage.setItem(CORE_REMOTE_URL_STORAGE_KEY, coreCatalogRemoteUrl);
+  } else {
+    localStorage.removeItem(CORE_REMOTE_URL_STORAGE_KEY);
+  }
+  startCoreCatalogRemotePolling();
+}
+
+async function pullRemoteCatalog(){
+  if(!coreCatalogRemoteUrl) return false;
+  const res = await fetch(coreCatalogRemoteUrl, { cache: "no-store" });
+  if(!res.ok) throw new Error(`Failed GET shared JSON (${res.status}).`);
+  const payload = await res.json();
+  applyCoreCatalog(payload, { allowEmpty: true });
+  saveCoreCatalogToLocalStorage();
+  return true;
+}
+
+async function pushRemoteCatalog(){
+  if(!coreCatalogRemoteUrl) return false;
+  const payload = buildCoreCatalogPayload();
+  const res = await fetch(coreCatalogRemoteUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if(!res.ok) throw new Error(`Failed PUT shared JSON (${res.status}).`);
+  return true;
+}
 
 function setSelectOptions(selectEl, options, keepValue) {
   if (!selectEl) return;
@@ -3962,10 +4156,14 @@ document.addEventListener("DOMContentLoaded", function(){
                  const __calc2 = document.getElementById('calculateEffortBtnStep2');
                  if(__calc2){ __calc2.addEventListener('click', function(){ if(typeof calculateEffort==='function'){ calculateEffort(); } }); }
 
+                 try{ loadCoreCatalogFromLocalStorage(); }catch(_e){}
+                 try{ setCoreCatalogRemoteUrl(getCatalogUrlFromLocation() || localStorage.getItem(CORE_REMOTE_URL_STORAGE_KEY) || ""); }catch(_e){}
+                 try{ pullRemoteCatalog().then(function(ok){ if(ok) setCoreCatalogStatus("Catalog synced from shared JSON.", false); }).catch(function(){}); }catch(_e){}
                  wireJiraHelpModal();
                  wireJiraParentModal();
                   wireTechDashboard();
                   wireCoreVersionDependency();
+                  wireCoreCatalogManager();
                   wireManualTasks();
                   wireAutoDetailsToggles();
                   wireStep1Navigation();
@@ -5056,6 +5254,175 @@ function applyAutoCountsToInputs(){
 
 function goBack(){
   showStep(1);
+}
+
+function setCoreCatalogStatus(message, isError){
+  const el = document.getElementById("coreCatalogStatus");
+  if(!el) return;
+  el.style.color = isError ? "#B42318" : "#0F766E";
+  el.textContent = message || "";
+}
+
+function wireCoreCatalogManager(){
+  const box = document.getElementById("coreCatalogManager");
+  const yes = document.getElementById("coreVersionAppearsYes");
+  const no = document.getElementById("coreVersionAppearsNo");
+  const addBtn = document.getElementById("addCoreVersionBtn");
+  const keyInput = document.getElementById("newCoreKey");
+  const labelInput = document.getElementById("newCoreLabel");
+  const techInput = document.getElementById("newCoreTechStackJson");
+  const exportBtn = document.getElementById("exportCoreCatalogBtn");
+  const importBtn = document.getElementById("importCoreCatalogBtn");
+  const importInput = document.getElementById("importCoreCatalogInput");
+  const remoteUrlInput = document.getElementById("coreCatalogRemoteUrl");
+  const connectRemoteBtn = document.getElementById("connectCoreCatalogRemoteBtn");
+  const copyShareBtn = document.getElementById("copyCoreCatalogShareLinkBtn");
+  const shareLinkInput = document.getElementById("coreCatalogShareLinkInput");
+  const loadFromLinkBtn = document.getElementById("loadCoreCatalogFromLinkBtn");
+
+  if(!box) return;
+
+  const toggle = () => {
+    box.style.display = (no && no.checked) ? "block" : "none";
+  };
+
+  if(yes) yes.addEventListener("change", toggle);
+  if(no) no.addEventListener("change", toggle);
+  toggle();
+  if(remoteUrlInput && coreCatalogRemoteUrl) remoteUrlInput.value = coreCatalogRemoteUrl;
+
+  if(connectRemoteBtn){
+    connectRemoteBtn.addEventListener("click", function(){
+      const url = String((remoteUrlInput && remoteUrlInput.value) || "").trim();
+      if(!url){ setCoreCatalogStatus("Enter shared JSON URL first.", true); return; }
+      setCoreCatalogRemoteUrl(url);
+      pullRemoteCatalog().then(function(){
+        setCoreCatalogStatus("Connected and synced shared JSON.", false);
+      }).catch(function(err){
+        setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
+      });
+    });
+  }
+
+  if(addBtn){
+    addBtn.addEventListener("click", function(){
+      try{
+        const key = normalizeCoreKey(keyInput && keyInput.value);
+        const label = String((labelInput && labelInput.value) || "").trim();
+        if(!key) throw new Error("Core key format must be like core22_1.");
+        if(!label) throw new Error("Display label is required.");
+        if((window.CORE_VERSIONS || []).some((v) => v.key === key)) throw new Error("Core version already exists.");
+
+        let techData = {};
+        const raw = String((techInput && techInput.value) || "{}").trim();
+        if(raw){
+          techData = JSON.parse(raw);
+          if(!techData || typeof techData !== "object" || Array.isArray(techData)) throw new Error("Tech stack JSON must be an object.");
+        }
+
+        const nextVersions = cloneDeep(window.CORE_VERSIONS || []);
+        nextVersions.push({ key, label });
+        nextVersions.sort((a, b) => compareCoreKeys(a.key, b.key));
+
+        const nextStack = cloneDeep(CORE_TECH_STACK || {});
+        nextStack[key] = techData;
+
+        applyCoreCatalog({ versions: nextVersions, techStack: nextStack });
+        saveCoreCatalogToLocalStorage();
+
+        const fromSel = document.getElementById("coreFrom");
+        const toSel = document.getElementById("coreTo");
+        if(fromSel && !fromSel.value) fromSel.value = key;
+        if(toSel) toSel.value = key;
+        updateUpgradeScopeFromRange();
+
+        setCoreCatalogStatus(`Added ${label} (${key}). Saved locally.`, false);
+        if(coreCatalogRemoteUrl){
+          pushRemoteCatalog().then(function(){
+            setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON.`, false);
+          }).catch(function(err){
+            setCoreCatalogStatus(`Added locally, but remote sync failed: ${err && err.message ? err.message : String(err)}`, true);
+          });
+        }
+      }catch(err){
+        setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
+      }
+    });
+  }
+
+  if(exportBtn){
+    exportBtn.addEventListener("click", function(){
+      try{ downloadCoreCatalog(); setCoreCatalogStatus("Catalog exported. Commit it to GitHub to share with all users.", false); }
+      catch(err){ setCoreCatalogStatus(err && err.message ? err.message : String(err), true); }
+    });
+  }
+
+  if(importBtn && importInput){
+    importBtn.addEventListener("click", function(){ importInput.click(); });
+    importInput.addEventListener("change", function(e){
+      const file = e && e.target && e.target.files ? e.target.files[0] : null;
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt){
+        try{
+          const payload = JSON.parse(String((evt && evt.target && evt.target.result) || "{}"));
+          applyCoreCatalog(payload);
+          saveCoreCatalogToLocalStorage();
+          setCoreCatalogStatus("Catalog imported and saved locally.", false);
+          if(coreCatalogRemoteUrl){
+            pushRemoteCatalog().then(function(){
+              setCoreCatalogStatus("Catalog imported and synced to shared JSON.", false);
+            }).catch(function(err){
+              setCoreCatalogStatus(`Imported locally, but remote sync failed: ${err && err.message ? err.message : String(err)}`, true);
+            });
+          }
+        }catch(err){
+          setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+    });
+  }
+
+  if(copyShareBtn){
+    copyShareBtn.addEventListener("click", async function(){
+      try{
+        const link = buildCoreCatalogShareLink();
+        if(!link){ setCoreCatalogStatus("Connect a shared JSON URL first.", true); return; }
+        if(shareLinkInput) shareLinkInput.value = link;
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          await navigator.clipboard.writeText(link);
+          setCoreCatalogStatus("Workspace link copied. Anyone with this link gets automatic updates.", false);
+        } else {
+          setCoreCatalogStatus("Workspace link generated. Copy it from the input field.", false);
+        }
+      }catch(err){
+        setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
+      }
+    });
+  }
+
+  if(loadFromLinkBtn){
+    loadFromLinkBtn.addEventListener("click", function(){
+      const link = String((shareLinkInput && shareLinkInput.value) || "").trim();
+      if(!link){ setCoreCatalogStatus("Paste a workspace link first.", true); return; }
+      try{
+        const u = new URL(link);
+        const sharedUrl = String(u.searchParams.get("catalogUrl") || "").trim();
+        if(!sharedUrl) throw new Error("Workspace link is missing catalogUrl parameter.");
+        setCoreCatalogRemoteUrl(sharedUrl);
+        if(remoteUrlInput) remoteUrlInput.value = sharedUrl;
+        pullRemoteCatalog().then(function(){
+          setCoreCatalogStatus("Workspace link connected. Catalog synced.", false);
+        }).catch(function(err){
+          setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
+        });
+      }catch(err){
+        setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
+      }
+    });
+  }
 }
 
 function wireStep1Navigation(){
