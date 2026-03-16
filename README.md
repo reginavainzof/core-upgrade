@@ -1,29 +1,23 @@
 # core-upgrade
 
-## Core version management without a database (GitHub-based)
+## Auto-shared core catalog (without DB and without Git credentials)
 
-If you don't have a DB, use a **shared JSON catalog** in GitHub as the source of truth.
+Use a **shared JSON endpoint** (URL that supports `GET` + `PUT` + CORS).
 
-### Recommended flow
-1. On Step 1, if user selects **"Does the core version appear? → No"**, open the new **Add missing core version** panel.
-2. Add:
-   - `core key` (example: `core22_1`)
-   - display label (example: `core 22.1`)
-   - optional `CORE_TECH_STACK` JSON parameters.
-3. Click **Add core version**.
-   - Version is available immediately in `coreFrom` / `coreTo`.
-   - Data is saved in browser `localStorage` (works instantly for the same user/browser).
-4. To share with everyone:
-   - Click **Export catalog JSON**.
-   - Commit the exported `core-catalog.json` into GitHub.
-   - Other users load it via **Load from GitHub URL** (raw GitHub URL).
+### How it works
+1. Open the tool and choose **Does the core version appear? → No**.
+2. In **Connect shared JSON**, paste the shared endpoint URL and click **Connect shared JSON**.
+3. Add new core version + optional `CORE_TECH_STACK` JSON.
+4. The app saves locally **and automatically pushes** the updated catalog to the shared JSON URL.
+5. Click **Copy workspace link** and send it to other users.
+6. Anyone opening that link is connected to the same shared JSON and gets updates automatically (polling).
 
-### Why this works without DB
-- **Local continuity**: localStorage keeps new versions for the current user.
-- **Cross-user continuity**: GitHub JSON file acts as persistent shared storage.
-- **No backend needed**: all done in the static app + GitHub file workflow.
+### What this gives you
+- No database required.
+- No GitHub password/token required for end users.
+- One workspace link for everyone.
+- New core versions and related tech-stack changes become available to all users automatically after sync.
 
-### Suggested governance
-- Keep one canonical file in repo, e.g. `core-catalog.json`.
-- Protect changes with PR review.
-- Validate key format `coreNN_N` and avoid duplicates.
+### Important
+- Your shared JSON provider must allow browser `GET`/`PUT` with CORS.
+- This is a collaborative endpoint (last write wins).

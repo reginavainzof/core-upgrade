@@ -1052,7 +1052,7 @@
                   </div>
                   <div class="upload-box" id="coreCatalogManager" style="display:none; margin-bottom:12px;">
                      <label>Add missing core version (no DB mode)</label>
-                     <small style="margin-bottom:10px;">This saves locally in your browser. To share with other users, export JSON and commit it to GitHub (or load from a GitHub raw URL).</small>
+                     <small style="margin-bottom:10px;">Use a shared JSON endpoint (GET/PUT). Once connected, every add/update is auto-synced so everyone using your workspace link sees updates automatically.</small>
                      <div class="input-grid" style="margin-top:10px; margin-bottom:10px;">
                         <div class="input-group">
                            <label for="newCoreKey">Core key</label>
@@ -1072,8 +1072,15 @@
                        <input type="file" id="importCoreCatalogInput" accept="application/json,.json" style="display:none;" />
                      </div>
                      <div style="display:flex; gap:8px; margin-top:10px;">
-                       <input class="initial-select" id="coreCatalogGithubUrl" placeholder="https://raw.githubusercontent.com/<org>/<repo>/<branch>/core-catalog.json" />
-                       <button type="button" class="back-button" id="loadCoreCatalogFromGithubBtn">Load from GitHub URL</button>
+                       <input class="initial-select" id="coreCatalogRemoteUrl" placeholder="Shared JSON URL (must support GET + PUT + CORS)" />
+                       <button type="button" class="back-button" id="connectCoreCatalogRemoteBtn">Connect shared JSON</button>
+                     </div>
+                     <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+                       <button type="button" class="back-button" id="copyCoreCatalogShareLinkBtn">Copy workspace link</button>
+                     </div>
+                     <div style="display:flex; gap:8px; margin-top:10px;">
+                       <input class="initial-select" id="coreCatalogShareLinkInput" placeholder="Paste workspace link here" />
+                       <button type="button" class="back-button" id="loadCoreCatalogFromLinkBtn">Load workspace link</button>
                      </div>
                      <small id="coreCatalogStatus" style="margin-top:10px;"></small>
                   </div>
@@ -1988,6 +1995,66 @@ function downloadCoreCatalog(){
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+const CORE_REMOTE_URL_STORAGE_KEY = "core_upgrade.catalog.remoteUrl";
+let coreCatalogRemotePollTimer = null;
+let coreCatalogRemoteUrl = "";
+
+function getCatalogUrlFromLocation(){
+  const url = new URL(location.href);
+  return String(url.searchParams.get("catalogUrl") || "").trim();
+}
+
+function buildCoreCatalogShareLink(){
+  if(!coreCatalogRemoteUrl) return "";
+  const url = new URL(location.href);
+  url.searchParams.set("catalogUrl", coreCatalogRemoteUrl);
+  return url.toString();
+}
+
+function stopCoreCatalogRemotePolling(){
+  if(coreCatalogRemotePollTimer){ clearInterval(coreCatalogRemotePollTimer); coreCatalogRemotePollTimer = null; }
+}
+
+function startCoreCatalogRemotePolling(){
+  stopCoreCatalogRemotePolling();
+  if(!coreCatalogRemoteUrl) return;
+  coreCatalogRemotePollTimer = setInterval(function(){
+    pullRemoteCatalog().catch(() => {});
+  }, 10000);
+}
+
+function setCoreCatalogRemoteUrl(url){
+  coreCatalogRemoteUrl = String(url || "").trim();
+  if(coreCatalogRemoteUrl){
+    localStorage.setItem(CORE_REMOTE_URL_STORAGE_KEY, coreCatalogRemoteUrl);
+  } else {
+    localStorage.removeItem(CORE_REMOTE_URL_STORAGE_KEY);
+  }
+  startCoreCatalogRemotePolling();
+}
+
+async function pullRemoteCatalog(){
+  if(!coreCatalogRemoteUrl) return false;
+  const res = await fetch(coreCatalogRemoteUrl, { cache: "no-store" });
+  if(!res.ok) throw new Error(`Failed GET shared JSON (${res.status}).`);
+  const payload = await res.json();
+  applyCoreCatalog(payload, { allowEmpty: true });
+  saveCoreCatalogToLocalStorage();
+  return true;
+}
+
+async function pushRemoteCatalog(){
+  if(!coreCatalogRemoteUrl) return false;
+  const payload = buildCoreCatalogPayload();
+  const res = await fetch(coreCatalogRemoteUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if(!res.ok) throw new Error(`Failed PUT shared JSON (${res.status}).`);
+  return true;
 }
 
 function setSelectOptions(selectEl, options, keepValue) {
@@ -4090,6 +4157,8 @@ document.addEventListener("DOMContentLoaded", function(){
                  if(__calc2){ __calc2.addEventListener('click', function(){ if(typeof calculateEffort==='function'){ calculateEffort(); } }); }
 
                  try{ loadCoreCatalogFromLocalStorage(); }catch(_e){}
+                 try{ setCoreCatalogRemoteUrl(getCatalogUrlFromLocation() || localStorage.getItem(CORE_REMOTE_URL_STORAGE_KEY) || ""); }catch(_e){}
+                 try{ pullRemoteCatalog().then(function(ok){ if(ok) setCoreCatalogStatus("Catalog synced from shared JSON.", false); }).catch(function(){}); }catch(_e){}
                  wireJiraHelpModal();
                  wireJiraParentModal();
                   wireTechDashboard();
@@ -5205,8 +5274,11 @@ function wireCoreCatalogManager(){
   const exportBtn = document.getElementById("exportCoreCatalogBtn");
   const importBtn = document.getElementById("importCoreCatalogBtn");
   const importInput = document.getElementById("importCoreCatalogInput");
-  const githubUrlInput = document.getElementById("coreCatalogGithubUrl");
-  const loadGithubBtn = document.getElementById("loadCoreCatalogFromGithubBtn");
+  const remoteUrlInput = document.getElementById("coreCatalogRemoteUrl");
+  const connectRemoteBtn = document.getElementById("connectCoreCatalogRemoteBtn");
+  const copyShareBtn = document.getElementById("copyCoreCatalogShareLinkBtn");
+  const shareLinkInput = document.getElementById("coreCatalogShareLinkInput");
+  const loadFromLinkBtn = document.getElementById("loadCoreCatalogFromLinkBtn");
 
   if(!box) return;
 
@@ -5217,6 +5289,20 @@ function wireCoreCatalogManager(){
   if(yes) yes.addEventListener("change", toggle);
   if(no) no.addEventListener("change", toggle);
   toggle();
+  if(remoteUrlInput && coreCatalogRemoteUrl) remoteUrlInput.value = coreCatalogRemoteUrl;
+
+  if(connectRemoteBtn){
+    connectRemoteBtn.addEventListener("click", function(){
+      const url = String((remoteUrlInput && remoteUrlInput.value) || "").trim();
+      if(!url){ setCoreCatalogStatus("Enter shared JSON URL first.", true); return; }
+      setCoreCatalogRemoteUrl(url);
+      pullRemoteCatalog().then(function(){
+        setCoreCatalogStatus("Connected and synced shared JSON.", false);
+      }).catch(function(err){
+        setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
+      });
+    });
+  }
 
   if(addBtn){
     addBtn.addEventListener("click", function(){
@@ -5251,6 +5337,13 @@ function wireCoreCatalogManager(){
         updateUpgradeScopeFromRange();
 
         setCoreCatalogStatus(`Added ${label} (${key}). Saved locally.`, false);
+        if(coreCatalogRemoteUrl){
+          pushRemoteCatalog().then(function(){
+            setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON.`, false);
+          }).catch(function(err){
+            setCoreCatalogStatus(`Added locally, but remote sync failed: ${err && err.message ? err.message : String(err)}`, true);
+          });
+        }
       }catch(err){
         setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
       }
@@ -5276,6 +5369,13 @@ function wireCoreCatalogManager(){
           applyCoreCatalog(payload);
           saveCoreCatalogToLocalStorage();
           setCoreCatalogStatus("Catalog imported and saved locally.", false);
+          if(coreCatalogRemoteUrl){
+            pushRemoteCatalog().then(function(){
+              setCoreCatalogStatus("Catalog imported and synced to shared JSON.", false);
+            }).catch(function(err){
+              setCoreCatalogStatus(`Imported locally, but remote sync failed: ${err && err.message ? err.message : String(err)}`, true);
+            });
+          }
         }catch(err){
           setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
         }
@@ -5285,17 +5385,39 @@ function wireCoreCatalogManager(){
     });
   }
 
-  if(loadGithubBtn){
-    loadGithubBtn.addEventListener("click", async function(){
-      const url = String((githubUrlInput && githubUrlInput.value) || "").trim();
-      if(!url){ setCoreCatalogStatus("Enter a GitHub raw JSON URL first.", true); return; }
+  if(copyShareBtn){
+    copyShareBtn.addEventListener("click", async function(){
       try{
-        const res = await fetch(url, { cache: "no-store" });
-        if(!res.ok) throw new Error(`Failed loading URL (${res.status}).`);
-        const payload = await res.json();
-        applyCoreCatalog(payload);
-        saveCoreCatalogToLocalStorage();
-        setCoreCatalogStatus("Catalog loaded from GitHub URL and saved locally.", false);
+        const link = buildCoreCatalogShareLink();
+        if(!link){ setCoreCatalogStatus("Connect a shared JSON URL first.", true); return; }
+        if(shareLinkInput) shareLinkInput.value = link;
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          await navigator.clipboard.writeText(link);
+          setCoreCatalogStatus("Workspace link copied. Anyone with this link gets automatic updates.", false);
+        } else {
+          setCoreCatalogStatus("Workspace link generated. Copy it from the input field.", false);
+        }
+      }catch(err){
+        setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
+      }
+    });
+  }
+
+  if(loadFromLinkBtn){
+    loadFromLinkBtn.addEventListener("click", function(){
+      const link = String((shareLinkInput && shareLinkInput.value) || "").trim();
+      if(!link){ setCoreCatalogStatus("Paste a workspace link first.", true); return; }
+      try{
+        const u = new URL(link);
+        const sharedUrl = String(u.searchParams.get("catalogUrl") || "").trim();
+        if(!sharedUrl) throw new Error("Workspace link is missing catalogUrl parameter.");
+        setCoreCatalogRemoteUrl(sharedUrl);
+        if(remoteUrlInput) remoteUrlInput.value = sharedUrl;
+        pullRemoteCatalog().then(function(){
+          setCoreCatalogStatus("Workspace link connected. Catalog synced.", false);
+        }).catch(function(err){
+          setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
+        });
       }catch(err){
         setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
       }
