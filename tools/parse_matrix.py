@@ -85,13 +85,13 @@ def build_catalog(source_docs: Path) -> Dict:
 
     versions = [
         {
-            "coreVersion": version,
-            "itemsCount": sum(len(entry["rows"]) for entry in parsed if entry["coreVersion"] == version),
+            "key": f"core{version.replace('.', '_')}",
+            "label": f"core {version}",
         }
         for version in valid_versions
     ]
 
-    core_tech_stack = {f"core{version.replace('.', '_')}": {} for version in valid_versions}
+    core_tech_stack = {entry["key"]: {} for entry in versions}
 
     return {
         "metadata": {
@@ -106,15 +106,8 @@ def build_catalog(source_docs: Path) -> Dict:
 
 
 def to_app_catalog(catalog: Dict) -> Dict:
-    versions = [
-        {
-            "key": f"core{entry['coreVersion'].replace('.', '_')}",
-            "label": f"core {entry['coreVersion']}",
-        }
-        for entry in catalog.get("versions", [])
-    ]
     return {
-        "versions": versions,
+        "versions": catalog.get("versions", []),
         "techStack": catalog.get("coreTechStack", {}),
     }
 
