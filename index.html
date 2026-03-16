@@ -2053,6 +2053,15 @@ function setCoreCatalogRemoteUrl(url){
   startCoreCatalogRemotePolling();
 }
 
+function isValidSharedJsonUrl(url){
+  try{
+    const u = new URL(String(url || "").trim());
+    return u.protocol === "http:" || u.protocol === "https:";
+  }catch(_e){
+    return false;
+  }
+}
+
 async function pullRemoteCatalog(){
   if(!coreCatalogRemoteUrl) return false;
   const res = await fetch(coreCatalogRemoteUrl, { cache: "no-store" });
@@ -5328,6 +5337,7 @@ function wireCoreCatalogManager(){
     connectRemoteBtn.addEventListener("click", function(){
       const url = String((remoteUrlInput && remoteUrlInput.value) || "").trim();
       if(!url){ setCoreCatalogStatus("Enter shared JSON URL first.", true); return; }
+      if(!isValidSharedJsonUrl(url)){ setCoreCatalogStatus("Shared JSON URL must be a valid http(s) URL.", true); return; }
       setCoreCatalogRemoteUrl(url);
       pullRemoteCatalog().then(function(){
         setCoreCatalogStatus("Connected and synced shared JSON.", false);
@@ -5382,10 +5392,14 @@ function wireCoreCatalogManager(){
 
         let targetUrl = coreCatalogRemoteUrl;
         if(!targetUrl){
-          const enteredUrl = prompt("To sync for everyone now, paste Shared JSON URL (GET + PUT + CORS):", "");
+          const enteredUrl = prompt("Paste Shared JSON URL for everyone sync (must be a full http(s) URL with GET+PUT+CORS). Example: https://api.example.com/core-catalog.json", String((remoteUrlInput && remoteUrlInput.value) || ""));
           targetUrl = String(enteredUrl || "").trim();
           if(!targetUrl){
             setCoreCatalogStatus(`Added ${label} (${key}) locally. Sync cancelled (no shared JSON URL provided).`, true);
+            return;
+          }
+          if(!isValidSharedJsonUrl(targetUrl)){
+            setCoreCatalogStatus("Sync cancelled: shared JSON URL must be a valid http(s) URL.", true);
             return;
           }
           setCoreCatalogRemoteUrl(targetUrl);
