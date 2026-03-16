@@ -1,0 +1,38 @@
+name: Import Supported Software Matrix
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/parse_matrix.py'
+      - 'data/source-docs/**'
+      - '.github/workflows/import-matrix.yml'
+  pull_request:
+    paths:
+      - 'tools/parse_matrix.py'
+      - 'data/source-docs/**'
+      - '.github/workflows/import-matrix.yml'
+
+jobs:
+  import-matrix:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install python-docx
+
+      - name: Generate catalog
+        run: python tools/parse_matrix.py
+
+      - name: Show generated files
+        run: |
+          cat data/generated/core-catalog.json
+          cat core-catalog.json
