@@ -1065,8 +1065,15 @@
                            <input class="initial-select" id="newCoreLabel" placeholder="core 22.1" />
                         </div>
                      </div>
-                     <label for="newCoreTechStackJson">CORE_TECH_STACK params (JSON, optional)</label>
-                     <textarea id="newCoreTechStackJson" style="width:100%; min-height:90px; margin-top:8px; padding:10px; border:1px solid var(--border); border-radius:8px;" placeholder='{"java":"OpenJDK 21","database":"Oracle 19"}'>{}</textarea>
+                     <label for="newCoreTechStackJson">CORE_TECH_STACK params (JSON, optional) *</label>
+                     <small style="margin-bottom:8px; display:block;">Not sure what to write? Paste the example below and edit values as needed.</small>
+                     <textarea id="newCoreTechStackJson" style="width:100%; min-height:170px; margin-top:8px; padding:10px; border:1px solid var(--border); border-radius:8px;" placeholder='{"java":"OpenJDK 21","database":"Oracle 19"}'>{
+  "java": "OpenJDK 21",
+  "database": "Oracle 19",
+  "kubernetes": "1.30",
+  "complexityMultiplier": 1.6,
+  "platform": "OpenShift"
+}</textarea>
                      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
                        <button type="button" class="calculate-btn" id="addCoreVersionBtn">Add core version</button>
                        <button type="button" class="back-button" id="exportCoreCatalogBtn">Export catalog JSON</button>
@@ -1912,6 +1919,15 @@ function normalizeCoreKey(value){
   return `core${parseInt(m[1], 10)}_${parseInt(m[2], 10)}`;
 }
 
+function normalizeCoreLabelToKey(label){
+  const raw = String(label || "").trim().toLowerCase();
+  const m = raw.match(/^core\s*(\d+)(?:[._\s-]+(\d+))?$/i);
+  if(!m) return "";
+  const major = parseInt(m[1], 10);
+  const minor = parseInt((m[2] == null || m[2] === "") ? "0" : m[2], 10);
+  return `core${major}_${minor}`;
+}
+
 function syncCoreTechStack(nextMap){
   Object.keys(CORE_TECH_STACK).forEach((k) => { delete CORE_TECH_STACK[k]; });
   Object.keys(nextMap || {}).forEach((k) => { CORE_TECH_STACK[k] = nextMap[k]; });
@@ -2037,6 +2053,15 @@ function setCoreCatalogRemoteUrl(url){
   startCoreCatalogRemotePolling();
 }
 
+function isValidSharedJsonUrl(url){
+  try{
+    const u = new URL(String(url || "").trim());
+    return u.protocol === "http:" || u.protocol === "https:";
+  }catch(_e){
+    return false;
+  }
+}
+
 async function pullRemoteCatalog(){
   if(!coreCatalogRemoteUrl) return false;
   const res = await fetch(coreCatalogRemoteUrl, { cache: "no-store" });
@@ -2056,6 +2081,15 @@ async function pushRemoteCatalog(){
     body: JSON.stringify(payload)
   });
   if(!res.ok) throw new Error(`Failed PUT shared JSON (${res.status}).`);
+  return true;
+}
+
+async function pullRepoCatalogSnapshot(){
+  const res = await fetch("./core-catalog.json", { cache: "no-store" });
+  if(!res.ok) throw new Error(`Failed GET repo core-catalog.json (${res.status}).`);
+  const payload = await res.json();
+  applyCoreCatalog(payload, { allowEmpty: true });
+  saveCoreCatalogToLocalStorage();
   return true;
 }
 
@@ -4160,7 +4194,13 @@ document.addEventListener("DOMContentLoaded", function(){
 
                  try{ loadCoreCatalogFromLocalStorage(); }catch(_e){}
                  try{ setCoreCatalogRemoteUrl(getCatalogUrlFromLocation() || localStorage.getItem(CORE_REMOTE_URL_STORAGE_KEY) || ""); }catch(_e){}
-                 try{ pullRemoteCatalog().then(function(ok){ if(ok) setCoreCatalogStatus("Catalog synced from shared JSON.", false); }).catch(function(){}); }catch(_e){}
+                 try{
+                   if(coreCatalogRemoteUrl){
+                     pullRemoteCatalog().then(function(ok){ if(ok) setCoreCatalogStatus("Catalog synced from shared JSON.", false); }).catch(function(){});
+                   } else {
+                     pullRepoCatalogSnapshot().then(function(ok){ if(ok) setCoreCatalogStatus("Catalog synced from Git (core-catalog.json).", false); }).catch(function(){});
+                   }
+                 }catch(_e){}
                  wireJiraHelpModal();
                  wireJiraParentModal();
                   wireTechDashboard();
@@ -5297,6 +5337,7 @@ function wireCoreCatalogManager(){
     connectRemoteBtn.addEventListener("click", function(){
       const url = String((remoteUrlInput && remoteUrlInput.value) || "").trim();
       if(!url){ setCoreCatalogStatus("Enter shared JSON URL first.", true); return; }
+      if(!isValidSharedJsonUrl(url)){ setCoreCatalogStatus("Shared JSON URL must be a valid http(s) URL.", true); return; }
       setCoreCatalogRemoteUrl(url);
       pullRemoteCatalog().then(function(){
         setCoreCatalogStatus("Connected and synced shared JSON.", false);
@@ -5314,6 +5355,11 @@ function wireCoreCatalogManager(){
         if(!key) throw new Error("Core key format must be like core22_1.");
         if(!label) throw new Error("Display label is required.");
         if((window.CORE_VERSIONS || []).some((v) => v.key === key)) throw new Error("Core version already exists.");
+
+        const labelKey = normalizeCoreLabelToKey(label);
+        if(labelKey && labelKey !== key){
+          throw new Error(`Core key (${key}) does not match display label (${label}). Example: label core30.0 should use key core30_0.`);
+        }
 
         let techData = {};
         const raw = String((techInput && techInput.value) || "{}").trim();
@@ -5338,14 +5384,33 @@ function wireCoreCatalogManager(){
         if(toSel) toSel.value = key;
         updateUpgradeScopeFromRange();
 
-        setCoreCatalogStatus(`Added ${label} (${key}). Saved locally.`, false);
-        if(coreCatalogRemoteUrl){
-          pushRemoteCatalog().then(function(){
-            setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON.`, false);
-          }).catch(function(err){
-            setCoreCatalogStatus(`Added locally, but remote sync failed: ${err && err.message ? err.message : String(err)}`, true);
-          });
+        const shouldShareNow = confirm(`Added ${label} (${key}) locally. Do you want to sync it to everyone now?`);
+        if(!shouldShareNow){
+          setCoreCatalogStatus(`Added ${label} (${key}). Saved locally only.`, false);
+          return;
         }
+
+        let targetUrl = coreCatalogRemoteUrl;
+        if(!targetUrl){
+          const enteredUrl = prompt("Paste Shared JSON URL for everyone sync (must be a full http(s) URL with GET+PUT+CORS). Example: https://api.example.com/core-catalog.json", String((remoteUrlInput && remoteUrlInput.value) || ""));
+          targetUrl = String(enteredUrl || "").trim();
+          if(!targetUrl){
+            setCoreCatalogStatus(`Added ${label} (${key}) locally. Sync cancelled (no shared JSON URL provided).`, true);
+            return;
+          }
+          if(!isValidSharedJsonUrl(targetUrl)){
+            setCoreCatalogStatus("Sync cancelled: shared JSON URL must be a valid http(s) URL.", true);
+            return;
+          }
+          setCoreCatalogRemoteUrl(targetUrl);
+          if(remoteUrlInput) remoteUrlInput.value = targetUrl;
+        }
+
+        pushRemoteCatalog().then(function(){
+          setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON. Everyone using this workspace link will see it.`, false);
+        }).catch(function(err){
+          setCoreCatalogStatus(`Added locally, but sync to shared JSON failed: ${err && err.message ? err.message : String(err)}`, true);
+        });
       }catch(err){
         setCoreCatalogStatus(err && err.message ? err.message : String(err), true);
       }
