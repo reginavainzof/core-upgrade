@@ -1081,9 +1081,10 @@
                        <input type="file" id="importCoreCatalogInput" accept="application/json,.json" style="display:none;" />
                      </div>
                      <div style="display:flex; gap:8px; margin-top:10px;">
-                       <input class="initial-select" id="coreCatalogRemoteUrl" placeholder="Shared JSON URL (must support GET + PUT + CORS)" />
+                       <input class="initial-select" id="coreCatalogRemoteUrl" placeholder="Company Shared JSON endpoint (https://.../core-catalog.json)" />
                        <button type="button" class="back-button" id="connectCoreCatalogRemoteBtn">Connect shared JSON</button>
                      </div>
+                     <small style="margin-top:6px; display:block;">What to paste here: one company API endpoint URL that returns and saves JSON (GET + PUT + CORS). Ask IT for the endpoint; example format: <code>https://api.company.com/core-catalog.json</code>.</small>
                      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
                        <button type="button" class="back-button" id="copyCoreCatalogShareLinkBtn">Copy workspace link</button>
                      </div>
@@ -2016,7 +2017,7 @@ function downloadCoreCatalog(){
 }
 
 const CORE_REMOTE_URL_STORAGE_KEY = "core_upgrade.catalog.remoteUrl";
-// Optional: set one company-wide endpoint once (GET + PUT + CORS) to avoid per-user prompts.
+// REQUIRED for company-wide behavior on the regular link: one shared endpoint (GET + PUT + CORS).
 const DEFAULT_ORG_SHARED_JSON_URL = "";
 let coreCatalogRemotePollTimer = null;
 let coreCatalogRemoteUrl = "";
@@ -5402,23 +5403,22 @@ function wireCoreCatalogManager(){
           return;
         }
 
-        const enteredUrl = prompt("Paste COMPANY Shared JSON URL for everyone sync (full http(s) endpoint with GET+PUT+CORS). Example: https://api.example.com/core-catalog.json", String((remoteUrlInput && remoteUrlInput.value) || DEFAULT_ORG_SHARED_JSON_URL || ""));
-        targetUrl = String(enteredUrl || "").trim();
+        targetUrl = String(DEFAULT_ORG_SHARED_JSON_URL || "").trim();
         if(!targetUrl){
-          setCoreCatalogStatus(`Added ${label} (${key}) locally. Sync cancelled. Ask IT for one company Shared JSON URL or configure DEFAULT_ORG_SHARED_JSON_URL in code.`, true);
+          setCoreCatalogStatus(`Added ${label} (${key}) locally. Company-wide sync is not configured yet. Set DEFAULT_ORG_SHARED_JSON_URL once in code, then all users on the regular link will get updates automatically.`, true);
           return;
         }
         if(!isValidSharedJsonUrl(targetUrl)){
-          setCoreCatalogStatus("Sync cancelled: shared JSON URL must be a valid http(s) URL.", true);
+          setCoreCatalogStatus("Company-wide sync misconfigured: DEFAULT_ORG_SHARED_JSON_URL must be a valid http(s) URL.", true);
           return;
         }
         setCoreCatalogRemoteUrl(targetUrl);
         if(remoteUrlInput) remoteUrlInput.value = targetUrl;
 
         pushRemoteCatalog().then(function(){
-          setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON. Everyone using this workspace link will see it.`, false);
+          setCoreCatalogStatus(`Added ${label} (${key}) and synced to company shared JSON. From now on, users opening the regular link will see it.`, false);
         }).catch(function(err){
-          setCoreCatalogStatus(`Added locally, but sync to shared JSON failed: ${err && err.message ? err.message : String(err)}`, true);
+          setCoreCatalogStatus(`Added locally, but company sync failed: ${err && err.message ? err.message : String(err)}`, true);
         });
       }catch(err){
         setCoreCatalogStatus(err && err.message ? err.message : String(err), true);

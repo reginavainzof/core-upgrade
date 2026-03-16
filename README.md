@@ -6,11 +6,18 @@ Use a **shared JSON endpoint** (URL that supports `GET` + `PUT` + CORS).
 
 ### How it works
 1. Open the tool and choose **Does the core version appear? → No**.
-2. In **Connect shared JSON**, paste the shared endpoint URL (full `http(s)` endpoint that supports browser `GET`/`PUT` + CORS, for example `https://api.example.com/core-catalog.json`) and click **Connect shared JSON**.
+2. Configure one company shared endpoint in code (`DEFAULT_ORG_SHARED_JSON_URL`) or connect it manually in the UI (full `http(s)` endpoint that supports browser `GET`/`PUT` + CORS, for example `https://api.example.com/core-catalog.json`).
 3. Add new core version + optional `CORE_TECH_STACK` JSON.
-4. The app saves locally and asks if you want to sync to everyone now. If you confirm, it pushes the updated catalog to the shared JSON URL.
+4. The app saves locally and asks if you want to sync to everyone now. If you confirm, it pushes to the company shared JSON endpoint.
 5. Click **Copy workspace link** and send it to other users.
 6. Anyone opening that link is connected to the same shared JSON and gets updates automatically (polling).
+
+
+Quick answer: what should users paste in "Connect shared JSON"?
+- Paste one **company shared API endpoint URL** that stores the catalog JSON.
+- It must support browser `GET` and `PUT` with CORS.
+- Example format: `https://api.company.com/core-catalog.json`.
+- Do **not** paste a regular website page URL; ask IT/backend team for the endpoint.
 
 ### What this gives you
 - No database required.
@@ -70,7 +77,7 @@ For enterprise use, configure one **company shared JSON endpoint** and use it fo
 - Every user keeps using the same app link.
 - No personal GitHub token is required in the UI.
 
-Tip: set `DEFAULT_ORG_SHARED_JSON_URL` in `index.html` once, so users do not need to paste the URL manually.
+Important: set `DEFAULT_ORG_SHARED_JSON_URL` in `index.html` once to make the regular link load and sync the same company catalog for all users.
 
 ### If you prefer Google Sheets
 Google Sheets can work via an intermediary API (for example Google Apps Script Web App):
