@@ -63,13 +63,18 @@ If you want all users to see the same catalog directly from the regular app link
 
 On app load (when no `catalogUrl` is configured), the tool now fetches `core-catalog.json` from the repo automatically, so users opening the normal link get the updated core versions without importing files or opening a different workspace link.
 
+### Company-wide sharing (recommended, no personal GitHub permissions)
+For enterprise use, configure one **company shared JSON endpoint** and use it for all users.
 
-### Sync directly to your GitHub repo from the app
-If no Shared JSON URL is configured, after adding a core version the app can ask to update GitHub directly.
+- Endpoint requirements: browser `GET` + `PUT` + CORS.
+- Every user keeps using the same app link.
+- No personal GitHub token is required in the UI.
 
-You will be prompted for:
-- Repository (`owner/repo` or full GitHub URL)
-- Branch (for example `main`)
-- GitHub token (PAT) with repo write permissions
+Tip: set `DEFAULT_ORG_SHARED_JSON_URL` in `index.html` once, so users do not need to paste the URL manually.
 
-The app writes `core-catalog.json` via GitHub Contents API, so your repository gets updated from the click flow.
+### If you prefer Google Sheets
+Google Sheets can work via an intermediary API (for example Google Apps Script Web App):
+- App calls your API endpoint (not the sheet directly).
+- API reads/writes JSON to the sheet and handles CORS/auth centrally.
+- This keeps permissions centralized and avoids per-user credentials in the tool.
+
