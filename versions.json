@@ -1,0 +1,52 @@
+{
+  "metadata": {
+    "sourceOfTruth": "versions.json",
+    "owners": [
+      "core-upgrade-owner@sapiens.com",
+      "architecture-owner@sapiens.com"
+    ],
+    "changeProcess": "Changes to upgrade policy must go through pull requests.",
+    "updatedAt": "2026-03-16"
+  },
+  "changelog": [
+    {
+      "date": "2026-03-16",
+      "version": "1.0.0",
+      "notes": "Initial externalized upgrade policy and version rules."
+    }
+  ],
+  "versions": [
+    { "key": "core16_0", "label": "core 16.0", "type": "major" },
+    { "key": "core17_0", "label": "core 17.0", "type": "major" },
+    { "key": "core18_0", "label": "core 18.0", "type": "quarterly" },
+    { "key": "core19_1", "label": "core 19.1", "type": "annual" },
+    { "key": "core19_2", "label": "core 19.2", "type": "quarterly" },
+    { "key": "core20_2", "label": "core 20.2", "type": "annual" },
+    { "key": "core21_3", "label": "core 21.3", "type": "major" }
+  ],
+  "rules": {
+    "supportedUpgradePath": [
+      { "fromType": "major", "toType": "major", "upgradeType": "major" },
+      { "fromType": "major", "toType": "annual", "upgradeType": "annual" },
+      { "fromType": "major", "toType": "quarterly", "upgradeType": "quarterly" },
+      { "fromType": "annual", "toType": "annual", "upgradeType": "annual" },
+      { "fromType": "annual", "toType": "quarterly", "upgradeType": "quarterly" },
+      { "fromType": "quarterly", "toType": "quarterly", "upgradeType": "quarterly" },
+      { "fromType": "quarterly", "toType": "annual", "upgradeType": "annual" },
+      { "fromType": "quarterly", "toType": "major", "upgradeType": "major" }
+    ],
+    "effortDefaultsByUpgradeType": {
+      "quarterly": { "dbMd": 5, "stabilizationMd": 10, "additionalPerVersionMd": 0 },
+      "annual": { "dbMd": 10, "stabilizationMd": 15, "additionalPerVersionMd": 5 },
+      "major": { "dbMd": 10, "stabilizationMd": 15, "additionalPerVersionMd": 0 }
+    },
+    "specialOverrides": [
+      {
+        "from": "core18_0",
+        "to": "core20_2",
+        "upgradeType": "major",
+        "effort": { "dbMd": 14, "stabilizationMd": 18 }
+      }
+    ]
+  }
+}

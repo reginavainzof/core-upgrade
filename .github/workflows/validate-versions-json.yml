@@ -1,0 +1,40 @@
+name: Validate versions.json
+
+on:
+  pull_request:
+    paths:
+      - "versions.json"
+      - ".github/workflows/validate-versions-json.yml"
+  push:
+    paths:
+      - "versions.json"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate JSON structure
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path('versions.json')
+          data = json.loads(p.read_text(encoding='utf-8'))
+
+          assert isinstance(data, dict), 'versions.json must be an object'
+          assert isinstance(data.get('versions'), list) and data['versions'], 'versions must be a non-empty array'
+          rules = data.get('rules')
+          assert isinstance(rules, dict), 'rules must be an object'
+          assert isinstance(rules.get('supportedUpgradePath'), list), 'rules.supportedUpgradePath must be an array'
+          defaults = rules.get('effortDefaultsByUpgradeType')
+          assert isinstance(defaults, dict), 'rules.effortDefaultsByUpgradeType must be an object'
+          for t in ('quarterly', 'annual', 'major'):
+              assert t in defaults, f'missing defaults for {t}'
+              block = defaults[t]
+              assert isinstance(block, dict), f'defaults for {t} must be an object'
+              assert 'dbMd' in block and 'stabilizationMd' in block, f'defaults for {t} must include dbMd and stabilizationMd'
+
+          print('versions.json schema is valid')
+          PY

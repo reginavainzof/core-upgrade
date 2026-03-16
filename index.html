@@ -1904,8 +1904,115 @@ const CORE_TECH_STACK = {
   { key: "core19_1", label: "core 19.1" },
   { key: "core19_2", label: "core 19.2" },
   { key: "core20_2", label: "core 20.2" },
-  { key: "core21_3", label: "core 21.3" }
+ { key: "core21_3", label: "core 21.3" }
 ];
+
+const DEFAULT_UPGRADE_POLICY = {
+  versions: JSON.parse(JSON.stringify(window.CORE_VERSIONS || [])).map((v) => ({ ...v, type: "quarterly" })),
+  rules: {
+    supportedUpgradePath: [
+      { fromType: "quarterly", toType: "quarterly", upgradeType: "quarterly" },
+      { fromType: "quarterly", toType: "annual", upgradeType: "annual" },
+      { fromType: "quarterly", toType: "major", upgradeType: "major" },
+      { fromType: "annual", toType: "annual", upgradeType: "annual" },
+      { fromType: "annual", toType: "major", upgradeType: "major" },
+      { fromType: "major", toType: "major", upgradeType: "major" }
+    ],
+    effortDefaultsByUpgradeType: {
+      quarterly: { dbMd: 5, stabilizationMd: 10, additionalPerVersionMd: 0 },
+      annual: { dbMd: 10, stabilizationMd: 15, additionalPerVersionMd: 5 },
+      major: { dbMd: 10, stabilizationMd: 15, additionalPerVersionMd: 0 }
+    },
+    specialOverrides: []
+  }
+};
+
+window.UPGRADE_POLICY = JSON.parse(JSON.stringify(DEFAULT_UPGRADE_POLICY));
+
+function ensureUpgradePolicySchema(policy){
+  if(!policy || typeof policy !== "object") throw new Error("Upgrade policy JSON must be an object.");
+  if(!Array.isArray(policy.versions) || !policy.versions.length) throw new Error("Upgrade policy must include a non-empty versions array.");
+  if(!policy.rules || typeof policy.rules !== "object") throw new Error("Upgrade policy must include rules.");
+  if(!Array.isArray(policy.rules.supportedUpgradePath)) throw new Error("rules.supportedUpgradePath must be an array.");
+  if(!policy.rules.effortDefaultsByUpgradeType || typeof policy.rules.effortDefaultsByUpgradeType !== "object") throw new Error("rules.effortDefaultsByUpgradeType is missing.");
+}
+
+function getPolicyVersionMap(){
+  const map = new Map();
+  const versions = Array.isArray(window.UPGRADE_POLICY && window.UPGRADE_POLICY.versions) ? window.UPGRADE_POLICY.versions : [];
+  versions.forEach((v, idx) => {
+    if(v && v.key) map.set(v.key, { ...v, index: idx });
+  });
+  return map;
+}
+
+function findUpgradePathAndRules(fromKey, toKey){
+  const policy = window.UPGRADE_POLICY || DEFAULT_UPGRADE_POLICY;
+  ensureUpgradePolicySchema(policy);
+
+  const versions = policy.versions;
+  const fromIdx = versions.findIndex((v) => v.key === fromKey);
+  const toIdx = versions.findIndex((v) => v.key === toKey);
+
+  if(fromIdx < 0) throw new Error(`Missing version configuration for FROM version: ${fromKey}`);
+  if(toIdx < 0) throw new Error(`Missing version configuration for TO version: ${toKey}`);
+  if(toIdx <= fromIdx) throw new Error("Unsupported upgrade: target version must be after source version.");
+
+  const path = versions.slice(fromIdx, toIdx + 1);
+  const routeRules = policy.rules.supportedUpgradePath || [];
+
+  for(let i = 0; i < path.length - 1; i++){
+    const fromV = path[i];
+    const toV = path[i + 1];
+    const supported = routeRules.find((r) => r.fromType === fromV.type && r.toType === toV.type);
+    if(!supported){
+      throw new Error(`Unsupported upgrade path: ${fromV.label} (${fromV.type}) -> ${toV.label} (${toV.type}).`);
+    }
+  }
+
+  const hopCount = toIdx - fromIdx;
+  const defaultUpgradeType = hopCount >= 2 ? "major" : ((path[0].type === "major" || path[1].type === "major") ? "major" : (path[1].type || "quarterly"));
+  const routeKey = `${fromKey}->${toKey}`;
+  const override = (policy.rules.specialOverrides || []).find((o) => `${o.from}->${o.to}` === routeKey) || null;
+  const upgradeType = (override && override.upgradeType) || defaultUpgradeType;
+
+  const defaults = (policy.rules.effortDefaultsByUpgradeType || {})[upgradeType];
+  if(!defaults) throw new Error(`Missing effort defaults for upgrade type: ${upgradeType}`);
+
+  const resolvedEffort = {
+    dbMd: Number(defaults.dbMd) || 0,
+    stabilizationMd: Number(defaults.stabilizationMd) || 0,
+    additionalPerVersionMd: Number(defaults.additionalPerVersionMd) || 0,
+    ...(override && override.effort ? override.effort : {})
+  };
+
+  return { path, hopCount, upgradeType, effort: resolvedEffort, override };
+}
+
+async function loadUpgradePolicyFromRepo(){
+  try{
+    const res = await fetch("./versions.json", { cache: "no-store" });
+    if(!res.ok) throw new Error(`Failed GET versions.json (${res.status})`);
+    const payload = await res.json();
+    ensureUpgradePolicySchema(payload);
+    window.UPGRADE_POLICY = payload;
+
+    const policyVersions = payload.versions
+      .map((v) => ({ key: normalizeCoreKey(v && v.key), label: String((v && v.label) || "").trim() }))
+      .filter((v) => v.key && v.label);
+    if(policyVersions.length){
+      window.CORE_VERSIONS = policyVersions;
+      setSelectOptions(document.getElementById("coreFrom"), window.CORE_VERSIONS, document.getElementById("coreFrom")?.value || "");
+      updateToOptionsFromFromSelection();
+      updateUpgradeScopeFromRange();
+    }
+    return true;
+  }catch(err){
+    console.warn("Upgrade policy load fallback:", err);
+    window.UPGRADE_POLICY = JSON.parse(JSON.stringify(DEFAULT_UPGRADE_POLICY));
+    return false;
+  }
+}
 
 const CORE_CATALOG_STORAGE_KEY = "core_upgrade.catalog.v1";
 const DEFAULT_CORE_VERSIONS = JSON.parse(JSON.stringify(window.CORE_VERSIONS || []));
@@ -3286,15 +3393,29 @@ function calculateEffort() {
   readRiskInputsToState();
 			   const perfRequired = el("performanceRequired")?.checked;
                const perfEffort = perfRequired ? (parseInt(el("performanceMd")?.value, 10) || 10) : 0;
+                 const fromKey = String(el("coreFrom")?.value || "").trim();
+                 const toKey = String(el("coreTo")?.value || "").trim();
+                 if(!fromKey || !toKey){
+                   alert("Please select both FROM and TO core versions.");
+                   return;
+                 }
+
+                 let routeInfo;
+                 try{
+                   routeInfo = findUpgradePathAndRules(fromKey, toKey);
+                 }catch(err){
+                   alert("Upgrade validation failed: " + (err && err.message ? err.message : String(err)));
+                   return;
+                 }
+
                  const upgradeTypeEl = el("upgradeType");
                  const selectedUpgradeType = String((upgradeTypeEl && upgradeTypeEl.value) || "").trim();
-                 const inferredUpgradeType = (state.coreVersionsCount >= 2)
-                   ? "major"
-                   : (state.coreVersionsCount === 1 ? "annual" : "quarterly");
+                 const resolvedUpgradeType = String(routeInfo.upgradeType || "").trim();
                  const upgradeType = ["major", "annual", "quarterly"].includes(selectedUpgradeType)
                    ? selectedUpgradeType
-                   : inferredUpgradeType;
+                   : resolvedUpgradeType;
                  if(upgradeTypeEl && upgradeTypeEl.value !== upgradeType) upgradeTypeEl.value = upgradeType;
+                 state.coreVersionsCount = Number(routeInfo.hopCount) || 0;
                
                  const inputs = {
                    xmlFiles: parseInt(el("xmlFiles").value, 10) || 0,
@@ -3314,9 +3435,6 @@ channels: parseInt(el("channels").value, 10) || 0,
                
                  // Rates
                  const rates = {
-                   dbBase: { major: 15, annual: 10, quarterly: 5 },
-                   stabilizing: { major: 15, annual: 15, quarterly: 10 },
-
                    xmlMergeRate: 0.4,
                    jspMergeRate: 0.4,
                    changedMethodRate: 0.2,
@@ -3324,25 +3442,16 @@ channels: parseInt(el("channels").value, 10) || 0,
                    sessionBeanRate: 0.1,
                    coprRate: 0.2
                  };
-               
-                 // Core tasks (fixed per upgrade type)
-                 let dbChanges = 0;
-               
-               if (upgradeType === "annual") {
-               // Continuous annual upgrades: 10 MD for the first + 5 MD for each additional
-               const count = state.coreVersionsCount || 1;
-               dbChanges = 10 + Math.max(0, count - 1) * 5;
-               } else if (upgradeType === "major") {
-			   // Major (big-bang) upgrade: one-time effort
-               dbChanges = 10;
-               } else {
-               // quarterly
-               dbChanges = 5;
-               }
-               
+
+                 const effortRule = routeInfo.effort || {};
+                 const dbBase = Number(effortRule.dbMd) || 0;
+                 const perVersionDb = Number(effortRule.additionalPerVersionMd) || 0;
+                 // Core tasks from external policy rules
+                 const dbChanges = dbBase + Math.max(0, (state.coreVersionsCount || 1) - 1) * perVersionDb;
+
                  const newTechEffort = (state.coreVersionsCount || 0) * (inputs.newTechRate || 5);
 
-                 const stabilizing = Number(rates.stabilizing[upgradeType] ?? 0);
+                 const stabilizing = Number(effortRule.stabilizationMd) || 0;
                
                  // File based
                  const xmlEffort = inputs.xmlFiles * rates.xmlMergeRate;
@@ -3507,8 +3616,8 @@ const detailedBody = document.querySelector("#detailedTable tbody");
     "<td>Build & System test</td>" +
     "<td>Technical upgrade</td>" +
     "<td>Execution of DB changes</td>" +
-    "<td>" + (upgradeType === "annual" ? state.coreVersionsCount : 1) + "</td>" +
-    "<td>" + (upgradeType === "annual" ? "10 MD +5 per additional" : "fixed") + "</td>" +
+    "<td>" + ((state.coreVersionsCount || 0) > 0 ? state.coreVersionsCount : 1) + "</td>" +
+    "<td>" + (routeInfo.override ? "override" : ((effortRule.additionalPerVersionMd || 0) > 0 ? (effortRule.dbMd + " MD +" + effortRule.additionalPerVersionMd + " per additional") : "fixed")) + "</td>" +
     "<td>" + dbChanges.toFixed(1) + "</td>" +
   "</tr>" +
 
@@ -3592,7 +3701,7 @@ const detailedBody = document.querySelector("#detailedTable tbody");
     "</span>" +
   "</td>" +
   "<td>1</td>" +
-  "<td>" + rates.stabilizing[upgradeType] + "</td>" +
+  "<td>" + stabilizing + "</td>" +
   "<td>" + stabilizing.toFixed(1) + "</td>" +
 "</tr>" +
 
@@ -4195,6 +4304,7 @@ document.addEventListener("DOMContentLoaded", function(){
                  const __calc2 = document.getElementById('calculateEffortBtnStep2');
                  if(__calc2){ __calc2.addEventListener('click', function(){ if(typeof calculateEffort==='function'){ calculateEffort(); } }); }
 
+                 loadUpgradePolicyFromRepo().catch(function(){});
                  try{ loadCoreCatalogFromLocalStorage(); }catch(_e){}
                  try{ setCoreCatalogRemoteUrl(getCatalogUrlFromLocation() || localStorage.getItem(CORE_REMOTE_URL_STORAGE_KEY) || DEFAULT_ORG_SHARED_JSON_URL || ""); }catch(_e){}
                  try{
