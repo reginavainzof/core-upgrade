@@ -62,3 +62,14 @@ If you want all users to see the same catalog directly from the regular app link
 3. Commit + push to GitHub (and deploy as usual for your hosting).
 
 On app load (when no `catalogUrl` is configured), the tool now fetches `core-catalog.json` from the repo automatically, so users opening the normal link get the updated core versions without importing files or opening a different workspace link.
+
+
+### Sync directly to your GitHub repo from the app
+If no Shared JSON URL is configured, after adding a core version the app can ask to update GitHub directly.
+
+You will be prompted for:
+- Repository (`owner/repo` or full GitHub URL)
+- Branch (for example `main`)
+- GitHub token (PAT) with repo write permissions
+
+The app writes `core-catalog.json` via GitHub Contents API, so your repository gets updated from the click flow.

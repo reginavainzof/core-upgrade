@@ -2062,6 +2062,94 @@ function isValidSharedJsonUrl(url){
   }
 }
 
+const GITHUB_SYNC_CFG_STORAGE_KEY = "core_upgrade.catalog.githubCfg";
+
+function loadGithubSyncCfg(){
+  try{
+    const raw = localStorage.getItem(GITHUB_SYNC_CFG_STORAGE_KEY);
+    if(!raw) return { repo: "", branch: "main" };
+    const parsed = JSON.parse(raw);
+    return {
+      repo: String((parsed && parsed.repo) || "").trim(),
+      branch: String((parsed && parsed.branch) || "main").trim() || "main"
+    };
+  }catch(_e){
+    return { repo: "", branch: "main" };
+  }
+}
+
+function saveGithubSyncCfg(cfg){
+  const payload = {
+    repo: String((cfg && cfg.repo) || "").trim(),
+    branch: String((cfg && cfg.branch) || "main").trim() || "main"
+  };
+  localStorage.setItem(GITHUB_SYNC_CFG_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function parseGithubRepoSlug(input){
+  const raw = String(input || "").trim();
+  if(!raw) return "";
+  const direct = raw.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
+  if(direct) return `${direct[1]}/${direct[2]}`;
+  try{
+    const u = new URL(raw);
+    if(!/github\.com$/i.test(u.hostname)) return "";
+    const parts = u.pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+    if(parts.length < 2) return "";
+    return `${parts[0]}/${parts[1].replace(/\.git$/i, "")}`;
+  }catch(_e){
+    return "";
+  }
+}
+
+function toBase64Utf8(str){
+  const utf8 = unescape(encodeURIComponent(String(str || "")));
+  return btoa(utf8);
+}
+
+async function pushCatalogToGithub(repoSlug, branch, token){
+  const cleanRepo = parseGithubRepoSlug(repoSlug);
+  if(!cleanRepo) throw new Error("GitHub repository must be in owner/repo format or a github.com URL.");
+  if(!token) throw new Error("GitHub token is required.");
+
+  const [owner, repo] = cleanRepo.split("/");
+  const path = "core-catalog.json";
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  const headers = {
+    "Accept": "application/vnd.github+json",
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+
+  let existingSha = "";
+  const getRes = await fetch(`${apiUrl}?ref=${encodeURIComponent(branch || "main")}`, { headers });
+  if(getRes.ok){
+    const fileData = await getRes.json();
+    existingSha = String((fileData && fileData.sha) || "");
+  } else if(getRes.status !== 404){
+    throw new Error(`GitHub read failed (${getRes.status}).`);
+  }
+
+  const payload = buildCoreCatalogPayload();
+  const content = toBase64Utf8(JSON.stringify(payload, null, 2));
+  const body = {
+    message: `Update core-catalog.json via core-upgrade tool (${new Date().toISOString()})`,
+    content,
+    branch: String(branch || "main").trim() || "main"
+  };
+  if(existingSha) body.sha = existingSha;
+
+  const putRes = await fetch(apiUrl, { method: "PUT", headers, body: JSON.stringify(body) });
+  if(!putRes.ok){
+    let errText = "";
+    try{ errText = await putRes.text(); }catch(_e){}
+    throw new Error(`GitHub write failed (${putRes.status})${errText ? ": " + errText : ""}`);
+  }
+
+  saveGithubSyncCfg({ repo: cleanRepo, branch: body.branch });
+  return { repo: cleanRepo, branch: body.branch };
+}
+
 async function pullRemoteCatalog(){
   if(!coreCatalogRemoteUrl) return false;
   const res = await fetch(coreCatalogRemoteUrl, { cache: "no-store" });
@@ -5391,20 +5479,53 @@ function wireCoreCatalogManager(){
         }
 
         let targetUrl = coreCatalogRemoteUrl;
-        if(!targetUrl){
-          const enteredUrl = prompt("Paste Shared JSON URL for everyone sync (must be a full http(s) URL with GET+PUT+CORS). Example: https://api.example.com/core-catalog.json", String((remoteUrlInput && remoteUrlInput.value) || ""));
-          targetUrl = String(enteredUrl || "").trim();
-          if(!targetUrl){
-            setCoreCatalogStatus(`Added ${label} (${key}) locally. Sync cancelled (no shared JSON URL provided).`, true);
-            return;
-          }
-          if(!isValidSharedJsonUrl(targetUrl)){
-            setCoreCatalogStatus("Sync cancelled: shared JSON URL must be a valid http(s) URL.", true);
-            return;
-          }
-          setCoreCatalogRemoteUrl(targetUrl);
-          if(remoteUrlInput) remoteUrlInput.value = targetUrl;
+        if(targetUrl){
+          pushRemoteCatalog().then(function(){
+            setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON. Everyone using this workspace link will see it.`, false);
+          }).catch(function(err){
+            setCoreCatalogStatus(`Added locally, but sync to shared JSON failed: ${err && err.message ? err.message : String(err)}`, true);
+          });
+          return;
         }
+
+        const syncToGithub = confirm("No Shared JSON URL is configured. Do you want to update core-catalog.json directly in your GitHub repository now?");
+        if(syncToGithub){
+          const prevCfg = loadGithubSyncCfg();
+          const repoInput = prompt("GitHub repository (owner/repo or full GitHub URL):", prevCfg.repo || "");
+          const repoSlug = parseGithubRepoSlug(repoInput);
+          if(!repoSlug){
+            setCoreCatalogStatus("GitHub sync cancelled: repository must be owner/repo or github.com URL.", true);
+            return;
+          }
+          const branchInput = prompt("GitHub branch to update:", prevCfg.branch || "main");
+          const branch = String(branchInput || "").trim() || "main";
+          const token = prompt("GitHub token (PAT) with repo write access:", "");
+          const cleanToken = String(token || "").trim();
+          if(!cleanToken){
+            setCoreCatalogStatus("GitHub sync cancelled: token is required.", true);
+            return;
+          }
+
+          pushCatalogToGithub(repoSlug, branch, cleanToken).then(function(info){
+            setCoreCatalogStatus(`Added ${label} (${key}) and pushed to GitHub ${info.repo} (${info.branch}) in core-catalog.json. Next deploy will expose it to everyone.`, false);
+          }).catch(function(err){
+            setCoreCatalogStatus(`Added locally, but GitHub sync failed: ${err && err.message ? err.message : String(err)}`, true);
+          });
+          return;
+        }
+
+        const enteredUrl = prompt("Paste Shared JSON URL for everyone sync (must be a full http(s) URL with GET+PUT+CORS). Example: https://api.example.com/core-catalog.json", String((remoteUrlInput && remoteUrlInput.value) || ""));
+        targetUrl = String(enteredUrl || "").trim();
+        if(!targetUrl){
+          setCoreCatalogStatus(`Added ${label} (${key}) locally. Sync cancelled (no shared JSON URL provided).`, true);
+          return;
+        }
+        if(!isValidSharedJsonUrl(targetUrl)){
+          setCoreCatalogStatus("Sync cancelled: shared JSON URL must be a valid http(s) URL.", true);
+          return;
+        }
+        setCoreCatalogRemoteUrl(targetUrl);
+        if(remoteUrlInput) remoteUrlInput.value = targetUrl;
 
         pushRemoteCatalog().then(function(){
           setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON. Everyone using this workspace link will see it.`, false);
