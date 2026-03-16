@@ -1,0 +1,20 @@
+{
+  "versions": [
+    { "key": "core16_0", "label": "core 16.0" },
+    { "key": "core17_0", "label": "core 17.0" },
+    { "key": "core18_0", "label": "core 18.0" },
+    { "key": "core19_1", "label": "core 19.1" },
+    { "key": "core19_2", "label": "core 19.2" },
+    { "key": "core20_2", "label": "core 20.2" },
+    { "key": "core21_3", "label": "core 21.3" }
+  ],
+  "techStack": {
+    "core16_0": {},
+    "core17_0": {},
+    "core18_0": {},
+    "core19_1": {},
+    "core19_2": {},
+    "core20_2": {},
+    "core21_3": {}
+  }
+}
