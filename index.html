@@ -1919,6 +1919,15 @@ function normalizeCoreKey(value){
   return `core${parseInt(m[1], 10)}_${parseInt(m[2], 10)}`;
 }
 
+function normalizeCoreLabelToKey(label){
+  const raw = String(label || "").trim().toLowerCase();
+  const m = raw.match(/^core\s*(\d+)(?:[._\s-]+(\d+))?$/i);
+  if(!m) return "";
+  const major = parseInt(m[1], 10);
+  const minor = parseInt((m[2] == null || m[2] === "") ? "0" : m[2], 10);
+  return `core${major}_${minor}`;
+}
+
 function syncCoreTechStack(nextMap){
   Object.keys(CORE_TECH_STACK).forEach((k) => { delete CORE_TECH_STACK[k]; });
   Object.keys(nextMap || {}).forEach((k) => { CORE_TECH_STACK[k] = nextMap[k]; });
@@ -2063,6 +2072,15 @@ async function pushRemoteCatalog(){
     body: JSON.stringify(payload)
   });
   if(!res.ok) throw new Error(`Failed PUT shared JSON (${res.status}).`);
+  return true;
+}
+
+async function pullRepoCatalogSnapshot(){
+  const res = await fetch("./core-catalog.json", { cache: "no-store" });
+  if(!res.ok) throw new Error(`Failed GET repo core-catalog.json (${res.status}).`);
+  const payload = await res.json();
+  applyCoreCatalog(payload, { allowEmpty: true });
+  saveCoreCatalogToLocalStorage();
   return true;
 }
 
@@ -4167,7 +4185,13 @@ document.addEventListener("DOMContentLoaded", function(){
 
                  try{ loadCoreCatalogFromLocalStorage(); }catch(_e){}
                  try{ setCoreCatalogRemoteUrl(getCatalogUrlFromLocation() || localStorage.getItem(CORE_REMOTE_URL_STORAGE_KEY) || ""); }catch(_e){}
-                 try{ pullRemoteCatalog().then(function(ok){ if(ok) setCoreCatalogStatus("Catalog synced from shared JSON.", false); }).catch(function(){}); }catch(_e){}
+                 try{
+                   if(coreCatalogRemoteUrl){
+                     pullRemoteCatalog().then(function(ok){ if(ok) setCoreCatalogStatus("Catalog synced from shared JSON.", false); }).catch(function(){});
+                   } else {
+                     pullRepoCatalogSnapshot().then(function(ok){ if(ok) setCoreCatalogStatus("Catalog synced from Git (core-catalog.json).", false); }).catch(function(){});
+                   }
+                 }catch(_e){}
                  wireJiraHelpModal();
                  wireJiraParentModal();
                   wireTechDashboard();
@@ -5322,6 +5346,11 @@ function wireCoreCatalogManager(){
         if(!label) throw new Error("Display label is required.");
         if((window.CORE_VERSIONS || []).some((v) => v.key === key)) throw new Error("Core version already exists.");
 
+        const labelKey = normalizeCoreLabelToKey(label);
+        if(labelKey && labelKey !== key){
+          throw new Error(`Core key (${key}) does not match display label (${label}). Example: label core30.0 should use key core30_0.`);
+        }
+
         let techData = {};
         const raw = String((techInput && techInput.value) || "{}").trim();
         if(raw){
@@ -5345,7 +5374,7 @@ function wireCoreCatalogManager(){
         if(toSel) toSel.value = key;
         updateUpgradeScopeFromRange();
 
-        setCoreCatalogStatus(`Added ${label} (${key}). Saved locally.`, false);
+        setCoreCatalogStatus(`Added ${label} (${key}). Saved locally only. To share to everyone now: connect Shared JSON and sync, or commit core-catalog.json to GitHub.`, false);
         if(coreCatalogRemoteUrl){
           pushRemoteCatalog().then(function(){
             setCoreCatalogStatus(`Added ${label} (${key}) and synced to shared JSON.`, false);

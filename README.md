@@ -53,3 +53,12 @@ Example:
 ### How it is loaded later
 - On page load, catalog data is restored from `localStorage`.
 - If a shared JSON URL exists (from query param `catalogUrl` or `localStorage`), the app fetches it with HTTP `GET`, applies it, and keeps polling every 10 seconds.
+
+
+### Share to everyone via the same Git-hosted link (no extra actions)
+If you want all users to see the same catalog directly from the regular app link:
+1. Export catalog JSON from the app.
+2. Save/replace repository file `core-catalog.json` with that content.
+3. Commit + push to GitHub (and deploy as usual for your hosting).
+
+On app load (when no `catalogUrl` is configured), the tool now fetches `core-catalog.json` from the repo automatically, so users opening the normal link get the updated core versions without importing files or opening a different workspace link.
