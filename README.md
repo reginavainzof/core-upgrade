@@ -104,3 +104,33 @@ The upgrade policy is now managed in `versions.json` and includes:
 ### CI validation
 A GitHub Action validates `versions.json` structure on push/PR:
 - `.github/workflows/validate-versions-json.yml`
+
+## Stage 1 MVP: Supported Software Matrix import
+
+Stage 1 adds a simple `.docx` table parser and JSON generator without touching estimator logic or Excel updates.
+
+1. Place Supported Software Matrix files in `data/source-docs/`.
+2. Run:
+   - `pip install python-docx`
+   - `python tools/parse_matrix.py`
+3. Output is generated at `data/generated/core-catalog.json` with:
+   - `metadata`
+   - `versions`
+   - `coreTechStack`
+   - `imports`
+4. When at least one `.docx` is found, the parser also refreshes `core-catalog.json` (UI-compatible `versions` + `techStack`) so the app can pick up changes.
+
+A GitHub Actions workflow (`.github/workflows/import-matrix.yml`) runs the same parser on push/workflow dispatch.
+
+### How to verify it worked
+1. After commit/push, open **Actions** in GitHub.
+2. Run or open workflow **Import Supported Software Matrix** (`.github/workflows/import-matrix.yml`).
+3. If the workflow is green, open `data/generated/core-catalog.json` and verify `versions` entries exist in this format:
+
+```json
+"versions": [
+  { "key": "core20_2", "label": "core 20.2" },
+  { "key": "core21_0", "label": "core 21.0" },
+  { "key": "core21_3", "label": "core 21.3" }
+]
+```
