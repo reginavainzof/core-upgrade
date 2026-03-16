@@ -85,3 +85,22 @@ Google Sheets can work via an intermediary API (for example Google Apps Script W
 - API reads/writes JSON to the sheet and handles CORS/auth centrally.
 - This keeps permissions centralized and avoids per-user credentials in the tool.
 
+
+## Upgrade policy source of truth
+
+The upgrade policy is now managed in `versions.json` and includes:
+- Version list and version type.
+- Supported upgrade path matrix.
+- Effort defaults per upgrade type.
+- Special path overrides.
+- Governance metadata (owners + change process) and changelog entries.
+
+### Governance
+- **Single source of truth:** `versions.json`.
+- **Owners:** maintainers listed in `versions.json > metadata.owners`.
+- **Change process:** update through Pull Request only.
+- **Change log:** append an entry in `versions.json > changelog` for each policy update.
+
+### CI validation
+A GitHub Action validates `versions.json` structure on push/PR:
+- `.github/workflows/validate-versions-json.yml`
