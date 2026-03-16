@@ -125,7 +125,8 @@ A GitHub Actions workflow (`.github/workflows/import-matrix.yml`) runs the same 
 ### How to verify it worked
 1. After commit/push, open **Actions** in GitHub.
 2. Run or open workflow **Import Supported Software Matrix** (`.github/workflows/import-matrix.yml`).
-3. If the workflow is green, open `data/generated/core-catalog.json` and verify `versions` entries exist in this format:
+3. Trigger note: the workflow starts only after **commit + push** (or opening/updating a PR) with changes under `data/source-docs/`.
+4. If the workflow is green, open `data/generated/core-catalog.json` and verify `versions` entries exist in this format:
 
 ```json
 "versions": [

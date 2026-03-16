@@ -5,7 +5,12 @@ on:
   push:
     paths:
       - 'tools/parse_matrix.py'
-      - 'data/source-docs/**/*.docx'
+      - 'data/source-docs/**'
+      - '.github/workflows/import-matrix.yml'
+  pull_request:
+    paths:
+      - 'tools/parse_matrix.py'
+      - 'data/source-docs/**'
       - '.github/workflows/import-matrix.yml'
 
 jobs:
