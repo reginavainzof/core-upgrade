@@ -27,5 +27,7 @@ jobs:
       - name: Generate catalog
         run: python tools/parse_matrix.py
 
-      - name: Show generated file
-        run: cat data/generated/core-catalog.json
+      - name: Show generated files
+        run: |
+          cat data/generated/core-catalog.json
+          cat core-catalog.json

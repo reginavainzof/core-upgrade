@@ -16,8 +16,8 @@ HEADER_ALIASES = {
     "component": "component",
     "description": "description",
     "version": "version",
-    "applicable idit versions": "applicableIditVersions",
     "applicable idit version": "applicableIditVersions",
+    "applicable idit versions": "applicableIditVersions",
     "comments": "comments",
 }
 
@@ -31,7 +31,8 @@ TARGET_COLUMNS = [
 
 
 def normalize_header(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip().lower())
+    compact = re.sub(r"\s+", " ", value.strip().lower())
+    return re.sub(r"[^a-z0-9 ]", "", compact)
 
 
 def extract_core_version(file_name: str) -> str | None:
@@ -104,19 +105,41 @@ def build_catalog(source_docs: Path) -> Dict:
     }
 
 
+def to_app_catalog(catalog: Dict) -> Dict:
+    versions = [
+        {
+            "key": f"core{entry['coreVersion'].replace('.', '_')}",
+            "label": f"core {entry['coreVersion']}",
+        }
+        for entry in catalog.get("versions", [])
+    ]
+    return {
+        "versions": versions,
+        "techStack": catalog.get("coreTechStack", {}),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parse Supported Software Matrix .docx files")
     parser.add_argument("--source", default="data/source-docs", help="Source folder for .docx files")
     parser.add_argument("--output", default="data/generated/core-catalog.json", help="Output JSON path")
+    parser.add_argument(
+        "--app-output",
+        default="core-catalog.json",
+        help="Optional app catalog output path (UI-compatible versions + techStack)",
+    )
     args = parser.parse_args()
 
     source = Path(args.source)
     output = Path(args.output)
+    app_output = Path(args.app_output) if args.app_output else None
 
     output.parent.mkdir(parents=True, exist_ok=True)
     catalog = build_catalog(source)
 
     output.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
+    if app_output and catalog["metadata"]["documentsProcessed"] > 0:
+        app_output.write_text(json.dumps(to_app_catalog(catalog), indent=2) + "\n", encoding="utf-8")
     print(f"Wrote {output} from {catalog['metadata']['documentsProcessed']} document(s).")
 
 

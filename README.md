@@ -111,11 +111,13 @@ Stage 1 adds a simple `.docx` table parser and JSON generator without touching e
 
 1. Place Supported Software Matrix files in `data/source-docs/`.
 2. Run:
+   - `pip install python-docx`
    - `python tools/parse_matrix.py`
 3. Output is generated at `data/generated/core-catalog.json` with:
    - `metadata`
    - `versions`
    - `coreTechStack`
    - `imports`
+4. When at least one `.docx` is found, the parser also refreshes `core-catalog.json` (UI-compatible `versions` + `techStack`) so the app can pick up changes.
 
 A GitHub Actions workflow (`.github/workflows/import-matrix.yml`) runs the same parser on push/workflow dispatch.
